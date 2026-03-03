@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "name": "default_policy",
+  "recall_policies": [],
+  "fusion_policy": {},
+  "ranking_policy": {},
+  "post_processing": {}
+}
