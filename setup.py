@@ -35,7 +35,10 @@ setup(
             "black>=21.0",
             "pylint>=2.17.0",
             "mypy>=1.5.0",
-        ]
+        ],
+        "ann": [
+            "faiss-cpu>=1.7.0",
+        ],
     },
     classifiers=[
         "Development Status :: 3 - Alpha",
