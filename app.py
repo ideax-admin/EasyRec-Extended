@@ -4,10 +4,12 @@ from flask import Flask, jsonify, request
 from online.serving import RecommendationServer
 from core.config import get_config
 from easyrec_extended.model_manager import ModelManager
+from easyrec_extended.logging_config import configure_logging
+from easyrec_extended.metrics.middleware import MetricsMiddleware
 from serving.api import api_bp, register_components
 from serving.health_check import health_check as _health_check
 
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -34,6 +36,9 @@ if _recall_model_path:
 # Register serving components and blueprint
 register_components(server=server, model_manager=model_manager)
 app.register_blueprint(api_bp)
+
+# Register Prometheus metrics middleware (exposes /metrics)
+MetricsMiddleware(app)
 
 
 @app.route('/recommend', methods=['GET'])

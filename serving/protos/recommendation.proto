@@ -1,0 +1,49 @@
+syntax = "proto3";
+package easyrec_extended;
+
+service RecommendationService {
+  rpc GetRecommendations(RecommendRequest) returns (RecommendResponse);
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc ReloadModel(ReloadModelRequest) returns (ReloadModelResponse);
+}
+
+message RecommendRequest {
+  string user_id = 1;
+  int32 result_size = 2;
+  int32 candidate_size = 3;
+  map<string, string> filters = 4;
+  repeated string policies = 5;
+}
+
+message RecommendResponse {
+  string status = 1;
+  string request_id = 2;
+  string user_id = 3;
+  repeated RecommendedItem items = 4;
+  float processing_time_ms = 5;
+}
+
+message RecommendedItem {
+  string item_id = 1;
+  string title = 2;
+  string category = 3;
+  float score = 4;
+  string source = 5;
+}
+
+message HealthCheckRequest {}
+message HealthCheckResponse {
+  string status = 1;
+  string service = 2;
+  string version = 3;
+}
+
+message ReloadModelRequest {
+  string version = 1;
+  string model_dir = 2;
+}
+
+message ReloadModelResponse {
+  string status = 1;
+  string message = 2;
+}

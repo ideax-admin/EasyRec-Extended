@@ -6,9 +6,19 @@ or any dict-backed store) and assemble them into the flat dict format
 expected by EasyRec's serving signature.
 """
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _observe_feature_latency(feature_type: str, elapsed: float):
+    """Record feature retrieval latency; silently ignores missing prometheus_client."""
+    try:
+        from easyrec_extended.metrics.prometheus_metrics import feature_service_latency_seconds
+        feature_service_latency_seconds.labels(feature_type=feature_type).observe(elapsed)
+    except Exception:
+        pass
 
 
 class FeatureService:
@@ -35,6 +45,7 @@ class FeatureService:
             Dict of feature name → value for the given user.
             Returns an empty dict if no features are found.
         """
+        t0 = time.time()
         try:
             if hasattr(self._store, 'hgetall'):
                 raw = self._store.hgetall(f"user:{user_id}")
@@ -44,6 +55,8 @@ class FeatureService:
         except Exception as e:
             logger.warning(f"Failed to fetch user features for {user_id}: {e}")
             return {}
+        finally:
+            _observe_feature_latency("user", time.time() - t0)
 
     def get_item_features(self, item_ids: List[str]) -> Dict[str, Dict[str, Any]]:
         """
@@ -56,6 +69,7 @@ class FeatureService:
             Dict mapping item_id → feature dict.
             Items with no features are mapped to an empty dict.
         """
+        t0 = time.time()
         result: Dict[str, Dict[str, Any]] = {}
         for item_id in item_ids:
             try:
@@ -72,6 +86,7 @@ class FeatureService:
             except Exception as e:
                 logger.warning(f"Failed to fetch item features for {item_id}: {e}")
                 result[item_id] = {}
+        _observe_feature_latency("item", time.time() - t0)
         return result
 
     def build_easyrec_features(

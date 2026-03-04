@@ -32,17 +32,20 @@ class ModelRankingEngine(BaseRankingEngine):
             score.  Defaults to ``'score'``; also tries ``'output_0'``.
     """
 
-    def __init__(self, model_manager=None, feature_service=None, score_key: str = 'score'):
+    def __init__(self, model_manager=None, feature_service=None, score_key: str = 'score',
+                 model_version=None):
         """Initialise the model ranking engine.
 
         Args:
             model_manager: ModelManager instance (optional).
             feature_service: FeatureService instance (optional).
             score_key: Key in the model output to use as ranking score.
+            model_version: Optional model version override for A/B experiments.
         """
         self._model_manager = model_manager
         self._feature_service = feature_service
         self._score_key = score_key
+        self._model_version = model_version
 
     def _extract_score(self, prediction: dict) -> float:
         """Extract a scalar score from a model prediction dict.
@@ -108,7 +111,9 @@ class ModelRankingEngine(BaseRankingEngine):
 
         # Batch predict
         try:
-            predictions = self._model_manager.batch_predict(feature_batch)
+            predictions = self._model_manager.batch_predict(
+                feature_batch, version=self._model_version
+            )
         except Exception as e:
             logger.error(f"ModelRankingEngine: batch_predict failed: {e}")
             predictions = [{} for _ in items]
