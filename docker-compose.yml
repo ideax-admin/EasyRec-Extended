@@ -10,6 +10,10 @@ services:
       - ENV=production
       - DB_HOST=postgres
       - REDIS_HOST=redis
+      - RANKING_MODEL_PATH=${RANKING_MODEL_PATH:-}
+      - RECALL_MODEL_PATH=${RECALL_MODEL_PATH:-}
+    volumes:
+      - ./models:/app/models
     depends_on:
       - postgres
       - redis

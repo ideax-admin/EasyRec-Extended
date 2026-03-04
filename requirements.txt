@@ -21,3 +21,4 @@ tensorflow>=2.5.0
 protobuf>=3.19.0
 grpcio>=1.40.0
 grpcio-tools>=1.40.0
+gunicorn>=21.2.0
