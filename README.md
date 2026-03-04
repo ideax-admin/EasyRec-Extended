@@ -220,3 +220,127 @@ MIT License – see [LICENSE](LICENSE) for details.
 4. Push to the branch and open a Pull Request
 
 Follow PEP 8 style and add tests for new functionality.
+
+---
+
+## gRPC Serving
+
+The gRPC service wraps the recommendation engine with low-latency Protocol Buffers transport.
+
+### Starting the gRPC server
+
+```bash
+# Default port 50051
+bash scripts/start_grpc.sh
+
+# Custom port
+GRPC_PORT=9090 bash scripts/start_grpc.sh
+```
+
+### Proto definition
+
+The service is defined in `serving/protos/recommendation.proto`.  Pre-generated Python stubs (`recommendation_pb2.py` / `recommendation_pb2_grpc.py`) are committed so the project works without running `protoc`.
+
+### Python client example
+
+```python
+import grpc
+from serving.protos import recommendation_pb2, recommendation_pb2_grpc
+
+channel = grpc.insecure_channel('localhost:50051')
+stub = recommendation_pb2_grpc.RecommendationServiceStub(channel)
+
+response = stub.GetRecommendations(
+    recommendation_pb2.RecommendRequest(user_id='user_42', result_size=10)
+)
+for item in response.items:
+    print(item.item_id, item.score)
+```
+
+---
+
+## Prometheus + Grafana Monitoring
+
+### Starting the monitoring stack
+
+```bash
+docker-compose up -d prometheus grafana
+```
+
+| Service    | URL                      |
+|-----------|--------------------------|
+| Prometheus | http://localhost:9090    |
+| Grafana    | http://localhost:3000    |
+| Metrics    | http://localhost:5000/metrics |
+
+### Available metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `recommendation_requests_total` | Counter | Total requests by status/endpoint |
+| `recommendation_latency_seconds` | Histogram | Per-stage pipeline latency |
+| `recall_items_count` | Histogram | Items returned by recall stage |
+| `ranking_model_score` | Histogram | Distribution of ranking scores |
+| `model_inference_latency_seconds` | Histogram | Model inference latency |
+| `model_loaded_versions` | Gauge | Number of loaded model versions |
+| `active_model_version` | Info | Active model version label |
+| `feature_service_latency_seconds` | Histogram | Feature retrieval latency |
+
+---
+
+## A/B Experiment Configuration
+
+```python
+from easyrec_extended.experiment.experiment_manager import ExperimentManager
+
+mgr = ExperimentManager()
+mgr.create_experiment(
+    name='ranking_v2_test',
+    control_version='v1',
+    treatment_version='v2',
+    traffic_split=0.2,   # 20% of users get treatment
+)
+
+# Assign a user deterministically
+arm = mgr.assign_user('user_42', 'ranking_v2_test')
+
+# Record outcome
+mgr.record_outcome('user_42', 'ranking_v2_test', 'click_through_rate', 1.0)
+
+# Retrieve results
+results = mgr.get_experiment_results('ranking_v2_test')
+```
+
+### Experiment REST API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/experiments` | List all experiments |
+| POST | `/api/v1/experiments` | Create a new experiment |
+| GET | `/api/v1/experiments/<name>/results` | Get experiment results |
+
+---
+
+## Structured Logging
+
+```python
+from easyrec_extended.logging_config import configure_logging, RequestContext
+
+# Call once at startup (or it is called automatically by app.py)
+configure_logging()   # reads LOG_LEVEL env var, defaults to INFO
+
+# Attach request-scoped metadata (propagates to all log lines in this task)
+RequestContext.set(request_id='abc-123', user_id='user_42', stage='recall')
+```
+
+Set the `LOG_LEVEL` environment variable to control verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`).
+
+### Request tracing
+
+Set `ENABLE_TRACE=true` to include a full pipeline trace in API responses:
+
+```bash
+ENABLE_TRACE=true python app.py
+```
+
+Each response `metadata.trace` field will contain per-stage timing, item counts, model version used, and A/B experiment assignment.

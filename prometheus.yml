@@ -1,9 +1,11 @@
-# Prometheus configuration
+# Prometheus configuration for EasyRec-Extended
 
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: 'your_service'
+  - job_name: 'easyrec-extended'
     static_configs:
-      - targets: ['localhost:5000']
+      - targets: ['app:5000']
+    metrics_path: /metrics

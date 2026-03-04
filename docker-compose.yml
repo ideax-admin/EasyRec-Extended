@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  easyrec:
+  app:
     build: .
     container_name: easyrec-extended
     ports:
@@ -37,6 +37,28 @@ services:
     container_name: easyrec-redis
     ports:
       - "6379:6379"
+    networks:
+      - easyrec-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: easyrec-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+    networks:
+      - easyrec-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: easyrec-grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
     networks:
       - easyrec-network
 

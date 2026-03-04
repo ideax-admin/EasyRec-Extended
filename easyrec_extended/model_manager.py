@@ -49,6 +49,7 @@ class ModelManager:
             self._versions[version] = inference
             if self._active_version is None:
                 self._active_version = version
+        self._update_metrics()
         logger.info(f"Model version '{version}' loaded (active={self._active_version})")
 
     def set_active_version(self, version: str):
@@ -65,6 +66,7 @@ class ModelManager:
             if version not in self._versions:
                 raise ValueError(f"Model version '{version}' is not loaded")
             self._active_version = version
+        self._update_metrics()
         logger.info(f"Active model version switched to '{version}'")
 
     def reload_version(self, version: str, new_model_dir: str):
@@ -136,3 +138,18 @@ class ModelManager:
                 and self._active_version in self._versions
                 and self._versions[self._active_version].is_loaded
             )
+
+    def _update_metrics(self):
+        """Refresh Prometheus gauges for loaded / active version counts."""
+        try:
+            from easyrec_extended.metrics.prometheus_metrics import (
+                model_loaded_versions,
+                active_model_version,
+            )
+            with self._lock:
+                n = len(self._versions)
+                active = self._active_version or ""
+            model_loaded_versions.set(n)
+            active_model_version.info({"version": active})
+        except Exception:
+            pass
