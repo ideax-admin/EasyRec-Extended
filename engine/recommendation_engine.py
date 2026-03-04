@@ -57,8 +57,10 @@ class RecommendationEngine:
             # Create result
             from core.models import RecommendationResult
             result = RecommendationResult(
-                request=request,
-                recommended_items=final_items
+                request_id=request_id,
+                items=final_items,
+                user_id=request.user_context.user_id,
+                processing_time_ms=processing_time_ms
             )
             
             logger.info(f"[{request_id}] Completed in {processing_time_ms:.2f}ms with {len(final_items)} results")
@@ -68,30 +70,38 @@ class RecommendationEngine:
             logger.error(f"[{request_id}] Error: {str(e)}", exc_info=True)
             from core.models import RecommendationResult
             return RecommendationResult(
-                request=request,
-                recommended_items=[]
+                request_id=request_id,
+                items=[],
+                user_id=getattr(getattr(request, 'user_context', None), 'user_id', 'unknown')
             )
     
     def _recall_stage(self, request, request_id: str) -> List:
         """Retrieve candidate items from various sources."""
         items = []
         candidate_size = getattr(request, 'candidate_size', 100)
-        
-        from core.models import Item, ItemType
-        
-        for i in range(candidate_size):
-            item = Item(
-                item_id=f"item_{i}",
-                type=ItemType.PRODUCT,
-                attributes={
-                    "title": f"Product {i}",
-                    "category": "electronics",
-                    "score": 0.5 + (i % 50) / 100,
-                    "source": "recall"
-                }
-            )
-            items.append(item)
-        
+
+        if self.recall_engines:
+            for name, engine in self.recall_engines.items():
+                try:
+                    recalled = engine.recall(request)
+                    items.extend(recalled)
+                    logger.debug(f"[{request_id}] Recall engine '{name}' returned {len(recalled)} items")
+                except Exception as e:
+                    logger.warning(f"[{request_id}] Recall engine '{name}' failed: {e}")
+
+        if not items:
+            from core.models import Item, ItemType, RecommendationSource
+            for i in range(candidate_size):
+                item = Item(
+                    item_id=f"item_{i}",
+                    title=f"Product {i}",
+                    category="electronics",
+                    item_type=ItemType.PRODUCT,
+                    score=0.5 + (i % 50) / 100,
+                    source=RecommendationSource.RECALL
+                )
+                items.append(item)
+
         logger.debug(f"[{request_id}] Recall stage: retrieved {len(items)} items")
         return items
     
@@ -110,7 +120,7 @@ class RecommendationEngine:
             return self.ranking_engine.rank(items, request.user_context)
         
         # Default sorting by score
-        return sorted(items, key=lambda x: x.attributes.get("score", 0), reverse=True)
+        return sorted(items, key=lambda x: getattr(x, 'score', 0), reverse=True)
     
     def _business_rules_stage(self, items: List, request, request_id: str) -> List:
         """Apply business rules and filters."""

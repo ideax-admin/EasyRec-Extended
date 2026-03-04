@@ -9,7 +9,30 @@ class PolicyManager:
             'business_rules': []
         }
         self.executors = {}
+        self._policy_store = []
     
+    def add_policy(self, policy: dict):
+        """Add a policy dict to the policy store."""
+        self._policy_store.append(policy)
+    
+    def remove_policy(self, policy_id):
+        """Remove a policy by id."""
+        self._policy_store = [p for p in self._policy_store if p.get('id') != policy_id]
+    
+    def get_policy(self, policy_id):
+        """Get a policy by id, returns None if not found."""
+        for p in self._policy_store:
+            if p.get('id') == policy_id:
+                return p
+        return None
+    
+    def update_policy(self, updated_policy: dict):
+        """Update an existing policy by id."""
+        for i, p in enumerate(self._policy_store):
+            if p.get('id') == updated_policy.get('id'):
+                self._policy_store[i] = updated_policy
+                return
+
     def register_policy(self, stage, policy_config):
         """Register a policy for a specific stage."""
         if stage not in self.policies:
