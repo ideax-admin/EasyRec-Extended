@@ -1,4 +1,4 @@
-.PHONY: help install dev test lint format clean
+.PHONY: help install dev test lint format clean proto serve-grpc serve-all
 
 help:
 	@echo "EasyRec-Extended Development Commands"
@@ -9,6 +9,9 @@ help:
 	@echo "lint       - Run linting"
 	@echo "format     - Format code"
 	@echo "clean      - Clean build artifacts"
+	@echo "proto      - Generate gRPC stubs from protos/recommendation.proto"
+	@echo "serve-grpc - Start with gRPC enabled (HTTP + gRPC)"
+	@echo "serve-all  - Start with both HTTP and gRPC (alias for serve-grpc)"
 
 install:
 	pip install -r requirements.txt
@@ -32,3 +35,12 @@ clean:
 	find . -type f -name "*.pyc" -delete
 	rm -rf build/ dist/ *.egg-info/
 	rm -rf .pytest_cache/ .coverage htmlcov/
+
+proto:
+	bash protos/generate.sh
+
+serve-grpc:
+	GRPC_ENABLED=true GRPC_PORT=50051 python app.py
+
+serve-all:
+	GRPC_ENABLED=true GRPC_PORT=50051 python app.py

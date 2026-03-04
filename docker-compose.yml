@@ -6,12 +6,15 @@ services:
     container_name: easyrec-extended
     ports:
       - "5000:5000"
+      - "50051:50051"
     environment:
       - ENV=production
       - DB_HOST=postgres
       - REDIS_HOST=redis
       - RANKING_MODEL_PATH=${RANKING_MODEL_PATH:-}
       - RECALL_MODEL_PATH=${RECALL_MODEL_PATH:-}
+      - GRPC_ENABLED=true
+      - GRPC_PORT=50051
     volumes:
       - ./models:/app/models
     depends_on:

@@ -4,13 +4,21 @@ import time
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
+from engine.parallel_executor import ParallelStageExecutor
+
 logger = logging.getLogger(__name__)
+
+# Default timeouts (milliseconds)
+_DEFAULT_RECALL_TIMEOUT_MS = 500.0
+_DEFAULT_REQUEST_TIMEOUT_MS = 2000.0
 
 
 class RecommendationEngine:
     """Main recommendation engine orchestrating the entire pipeline."""
 
-    def __init__(self, config=None, model_manager=None, feature_service=None):
+    def __init__(self, config=None, model_manager=None, feature_service=None,
+                 recall_timeout_ms: float = _DEFAULT_RECALL_TIMEOUT_MS,
+                 request_timeout_ms: float = _DEFAULT_REQUEST_TIMEOUT_MS):
         """Initialize the recommendation engine.
 
         Args:
@@ -19,6 +27,11 @@ class RecommendationEngine:
                 instance.  When provided and ready, model-based ranking is used.
             feature_service: Optional :class:`easyrec_extended.features.feature_service.FeatureService`
                 instance for feature enrichment.
+            recall_timeout_ms: Per-recall-engine timeout in milliseconds
+                (default 500 ms).
+            request_timeout_ms: Overall pipeline timeout in milliseconds
+                (default 2000 ms).  When exceeded, ranking degrades to
+                :class:`engine.ranking.score_ranking.ScoreRankingEngine`.
         """
         self.config = config
         self.model_manager = model_manager
@@ -28,6 +41,9 @@ class RecommendationEngine:
         self.ranking_engine = None
         self.policy_manager = None
         self.cache = {}
+        self.recall_timeout_ms = recall_timeout_ms
+        self.request_timeout_ms = request_timeout_ms
+        self._parallel_executor = ParallelStageExecutor()
         logger.info("Initialized RecommendationEngine")
     
     def recommend(self, request):
@@ -38,6 +54,9 @@ class RecommendationEngine:
         try:
             logger.info(f"[{request_id}] Starting recommendation for user {request.user_context.user_id}")
             
+            def _elapsed_ms():
+                return (time.time() - start_time) * 1000
+
             # Stage 1: Recall - retrieve candidate items
             logger.debug(f"[{request_id}] Stage 1: Recall")
             recalled_items = self._recall_stage(request, request_id)
@@ -54,8 +73,17 @@ class RecommendationEngine:
             logger.debug(f"[{request_id}] Fusion returned {len(fused_items)} items")
             
             # Stage 4: Ranking - rank items by relevance
+            # Degrade to ScoreRankingEngine when overall timeout is approaching
             logger.debug(f"[{request_id}] Stage 4: Ranking")
-            ranked_items = self._ranking_stage(fused_items, request, request_id)
+            if _elapsed_ms() > self.request_timeout_ms:
+                logger.warning(
+                    f"[{request_id}] Request timeout ({self.request_timeout_ms}ms) reached "
+                    "before ranking stage; degrading to ScoreRankingEngine"
+                )
+                from engine.ranking.score_ranking import ScoreRankingEngine
+                ranked_items = ScoreRankingEngine().rank(fused_items)
+            else:
+                ranked_items = self._ranking_stage(fused_items, request, request_id)
             logger.debug(f"[{request_id}] Ranking returned {len(ranked_items)} items")
             
             # Stage 5: Business Rules - apply business constraints
@@ -67,7 +95,7 @@ class RecommendationEngine:
             result_size = getattr(request, 'result_size', 20)
             final_items = final_items[:result_size]
             
-            processing_time_ms = (time.time() - start_time) * 1000
+            processing_time_ms = _elapsed_ms()
             
             # Create result
             from core.models import RecommendationResult
@@ -93,13 +121,20 @@ class RecommendationEngine:
     def _recall_stage(self, request, request_id: str) -> List:
         """Retrieve candidate items from various sources.
 
-        When a :class:`ModelManager` is available and ready the engine checks
-        for a registered ``'embedding'`` recall engine first.  If no embedding
-        recall engine is found it falls back to registered recall engines or,
-        finally, to synthetic fallback items.
+        When multiple recall engines are registered they are executed in
+        **parallel** using :class:`engine.parallel_executor.ParallelStageExecutor`.
+        Each engine has at most ``recall_timeout_ms`` milliseconds to return
+        results; slow or failing engines are skipped.  If *all* engines fail or
+        time out the pipeline falls back to
+        :class:`engine.recall.fallback_recall.FallbackRecallEngine`.
+
+        When a :class:`ModelManager` is available and ready the engine also
+        runs an :class:`engine.recall.embedding_recall.EmbeddingRecallEngine`
+        alongside the registered engines (unless one is already registered
+        under the ``'embedding'`` key).
         """
         items = []
-        candidate_size = getattr(request, 'candidate_size', 100)
+        callables = []
 
         # Prefer embedding-based recall when a model is available
         if (
@@ -113,29 +148,37 @@ class RecommendationEngine:
                     model_manager=self.model_manager,
                     feature_service=self.feature_service,
                 )
-                recalled = embedding_engine.recall(request)
-                items.extend(recalled)
-                logger.debug(
-                    f"[{request_id}] EmbeddingRecallEngine returned {len(recalled)} items"
-                )
+                callables.append(('embedding', embedding_engine.recall, request))
             except Exception as e:
-                logger.warning(f"[{request_id}] EmbeddingRecallEngine failed: {e}")
+                logger.warning(f"[{request_id}] Could not create EmbeddingRecallEngine: {e}")
 
-        if self.recall_engines:
-            for name, engine in self.recall_engines.items():
-                try:
-                    recalled = engine.recall(request)
-                    items.extend(recalled)
+        for name, engine in self.recall_engines.items():
+            callables.append((name, engine.recall, request))
+
+        if callables:
+            recall_metrics: Dict[str, Any] = {}
+            results = self._parallel_executor.execute_parallel(
+                callables, timeout_ms=self.recall_timeout_ms
+            )
+            for name, result, elapsed_ms in results:
+                recall_metrics[name] = {
+                    'count': len(result) if result is not None else 0,
+                    'elapsed_ms': elapsed_ms,
+                    'success': result is not None,
+                }
+                if result is not None:
+                    items.extend(result)
                     logger.debug(
-                        f"[{request_id}] Recall engine '{name}' returned {len(recalled)} items"
+                        f"[{request_id}] Recall engine '{name}' returned "
+                        f"{len(result)} items in {elapsed_ms:.1f}ms"
                     )
-                except Exception as e:
-                    logger.warning(f"[{request_id}] Recall engine '{name}' failed: {e}")
+            logger.debug(f"[{request_id}] Recall metrics: {recall_metrics}")
 
         if not items:
             from engine.recall.fallback_recall import FallbackRecallEngine
             fallback = FallbackRecallEngine()
             items = fallback.recall(request)
+            logger.debug(f"[{request_id}] Fallback recall returned {len(items)} items")
 
         logger.debug(f"[{request_id}] Recall stage: retrieved {len(items)} items")
         return items

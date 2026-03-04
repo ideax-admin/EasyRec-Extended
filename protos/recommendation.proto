@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package recommendation;
+
+// ── Service ──────────────────────────────────────────────────────────────────
+
+service RecommendService {
+  rpc Recommend(RecommendRequest) returns (RecommendResponse);
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  rpc ReloadModel(ReloadModelRequest) returns (ReloadModelResponse);
+}
+
+// ── Recommend ─────────────────────────────────────────────────────────────────
+
+message RecommendRequest {
+  string user_id = 1;
+  int32 result_size = 2;
+  int32 candidate_size = 3;
+  map<string, string> filters = 4;
+  repeated string policies = 5;
+  repeated string business_rules = 6;
+}
+
+message RecommendedItem {
+  string item_id = 1;
+  string title = 2;
+  string category = 3;
+  float score = 4;
+  string source = 5;
+}
+
+message RecommendResponse {
+  string status = 1;
+  string request_id = 2;
+  string user_id = 3;
+  repeated RecommendedItem items = 4;
+  float processing_time_ms = 5;
+  string error = 6;
+}
+
+// ── HealthCheck ───────────────────────────────────────────────────────────────
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  string status = 1;
+  string service = 2;
+  string version = 3;
+}
+
+// ── ListModels ────────────────────────────────────────────────────────────────
+
+message ListModelsRequest {}
+
+message ListModelsResponse {
+  repeated string loaded_versions = 1;
+  string active_version = 2;
+  bool is_ready = 3;
+}
+
+// ── ReloadModel ───────────────────────────────────────────────────────────────
+
+message ReloadModelRequest {
+  string version = 1;
+  string model_dir = 2;
+}
+
+message ReloadModelResponse {
+  string status = 1;
+  string message = 2;
+  string error = 3;
+}

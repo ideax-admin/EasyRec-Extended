@@ -16,11 +16,19 @@ EasyRec-Extended/
 │   └── model_manager.py          # Multi-version model management
 │
 ├── engine/                        # Recommendation pipeline
-│   └── recommendation_engine.py  # 4-stage pipeline orchestrator
+│   ├── recommendation_engine.py  # 4-stage pipeline orchestrator (parallel recall)
+│   └── parallel_executor.py      # Async parallel recall executor
 │
-├── serving/                       # HTTP serving layer
+├── serving/                       # Dual-protocol serving layer
 │   ├── api.py                     # Flask REST API routes
-│   └── health_check.py            # Health check utilities
+│   ├── grpc_service.py            # gRPC service implementation
+│   ├── health_check.py            # Health check utilities
+│   ├── recommendation_pb2.py      # Generated protobuf stubs
+│   └── recommendation_pb2_grpc.py # Generated gRPC stubs
+│
+├── protos/                        # Protocol Buffer definitions
+│   ├── recommendation.proto       # Service & message definitions
+│   └── generate.sh                # Stub generation script
 │
 ├── online/                        # Online serving
 │   └── serving.py                 # RecommendationServer
@@ -38,23 +46,27 @@ EasyRec-Extended/
 ├── config/
 │   └── pipeline.config.example   # EasyRec pipeline config example
 │
-├── app.py                         # Flask application entry point
+├── app.py                         # Flask + optional gRPC entry point
 ├── requirements.txt               # Python dependencies
 └── setup.py                       # Package setup
 ```
 
 ## Pipeline Architecture
 
-The recommendation pipeline runs four sequential stages:
+The recommendation pipeline runs four sequential stages, with **parallel recall**
+across multiple recall engines:
 
 ```
-Request → Recall → Fusion → Ranking → Business Rules → Response
+Request → Recall (parallel) → Fusion → Ranking → Business Rules → Response
 ```
 
-1. **Recall** – Retrieve candidate items (supports EasyRec DSSM/two-tower models or rule-based fallback)
+1. **Recall** – Retrieve candidate items in parallel from all registered engines
+   (timeout-protected; falls back to synthetic items if all engines fail)
 2. **Fusion** – Merge results from multiple recall sources with configurable strategies
-3. **Ranking** – Score and rank candidates (supports EasyRec DeepFM/WideAndDeep exported models)
-4. **Business Rules** – Apply post-processing filters, boosting, and diversity constraints via pluggable policies
+3. **Ranking** – Score and rank candidates (supports EasyRec DeepFM/WideAndDeep exported
+   models; degrades to score-based ranking under timeout pressure)
+4. **Business Rules** – Apply post-processing filters, boosting, and diversity constraints
+   via pluggable policies
 
 ## Quick Start
 
@@ -99,7 +111,14 @@ trainer.export_model(model_dir='experiments/my_model', export_dir='exports/v1')
 ### 4. Run the Serving Service
 
 ```bash
+# HTTP only (default)
 python app.py
+
+# HTTP + gRPC on port 50051
+GRPC_ENABLED=true python app.py
+
+# HTTP + gRPC on a custom port
+GRPC_ENABLED=true GRPC_PORT=50052 python app.py
 ```
 
 Or with Docker:
@@ -121,6 +140,80 @@ curl "http://localhost:5000/recommend?user_id=user123"
 
 # Health check
 curl http://localhost:5000/health
+```
+
+## gRPC API
+
+EasyRec-Extended can serve recommendations over gRPC for low-latency production use.
+The proto definition is in `protos/recommendation.proto`.
+
+### Enable gRPC
+
+```bash
+# Via environment variable
+GRPC_ENABLED=true GRPC_PORT=50051 python app.py
+
+# Via Make
+make serve-grpc
+```
+
+### Regenerate Stubs (after editing the proto)
+
+```bash
+make proto
+# or: bash protos/generate.sh
+```
+
+### gRPC Methods
+
+| Method | Description |
+|--------|-------------|
+| `Recommend` | Get personalized recommendations |
+| `HealthCheck` | Check service health |
+| `ListModels` | List loaded model versions |
+| `ReloadModel` | Hot-reload a model version |
+
+### Example with grpcurl
+
+```bash
+# Health check
+grpcurl -plaintext localhost:50051 recommendation.RecommendService/HealthCheck
+
+# Get recommendations
+grpcurl -plaintext -d '{"user_id":"user123","result_size":10}' \
+  localhost:50051 recommendation.RecommendService/Recommend
+
+# List models
+grpcurl -plaintext localhost:50051 recommendation.RecommendService/ListModels
+```
+
+### Dual-Protocol Architecture
+
+When `GRPC_ENABLED=true`, both protocols share the same `model_manager`,
+`server`, and `feature_service` instances:
+
+```
+                   ┌───────────────────────────────────┐
+HTTP :5000  ──────►│  Flask REST API  (serving/api.py) │
+                   │                                   │──► RecommendationServer
+gRPC :50051 ──────►│  gRPC Service    (grpc_service.py)│         │
+                   └───────────────────────────────────┘    ModelManager
+```
+
+### Parallel Recall Configuration
+
+The recall stage runs all registered engines concurrently:
+
+```python
+from engine.recommendation_engine import RecommendationEngine
+
+engine = RecommendationEngine(
+    recall_timeout_ms=500,    # per-engine timeout (default 500 ms)
+    request_timeout_ms=2000,  # overall pipeline timeout (default 2000 ms)
+)
+engine.register_recall_engine('cf', collaborative_filter_engine)
+engine.register_recall_engine('popular', popular_items_engine)
+# Both engines run in parallel; slow ones are skipped automatically
 ```
 
 ## REST API Reference
