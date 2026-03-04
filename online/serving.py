@@ -44,3 +44,12 @@ class RecommendationServer:
             self.error_count += 1
             logger.error(f'Error: {str(e)}')
             return {'status': 'error', 'error': str(e)}
+
+    def health_check(self) -> Dict[str, Any]:
+        return {
+            'status': 'healthy',
+            'service': self.config.SERVICE_NAME,
+            'version': self.config.VERSION,
+            'request_count': self.request_count,
+            'error_count': self.error_count
+        }

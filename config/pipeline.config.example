@@ -1,0 +1,154 @@
+# EasyRec Pipeline Configuration Example
+# This file uses protobuf text format (proto3).
+# Copy to config/pipeline.config and customize for your dataset.
+#
+# Reference: https://github.com/alibaba/EasyRec/blob/master/docs/source/quick_start/README.md
+
+train_input_path: "data/train.csv"
+eval_input_path: "data/eval.csv"
+model_dir: "experiments/deepfm_model"
+
+# ---------------------------------------------------------------
+# Data Configuration
+# ---------------------------------------------------------------
+data_config {
+  separator: ","
+  input_fields {
+    input_name: "label"
+    input_type: FLOAT
+    default_val: "0"
+  }
+  input_fields {
+    input_name: "user_id"
+    input_type: STRING
+    default_val: ""
+  }
+  input_fields {
+    input_name: "item_id"
+    input_type: STRING
+    default_val: ""
+  }
+  input_fields {
+    input_name: "age"
+    input_type: INT32
+    default_val: "0"
+  }
+  input_fields {
+    input_name: "category"
+    input_type: STRING
+    default_val: ""
+  }
+  input_fields {
+    input_name: "price"
+    input_type: FLOAT
+    default_val: "0.0"
+  }
+
+  label_fields: "label"
+  batch_size: 4096
+  num_epochs: 10
+  prefetch_size: 32
+  input_type: CSVInput
+}
+
+# ---------------------------------------------------------------
+# Feature Configuration
+# ---------------------------------------------------------------
+feature_config: {
+  features {
+    input_names: "user_id"
+    feature_type: IdFeature
+    embedding_dim: 16
+    hash_bucket_size: 100000
+  }
+  features {
+    input_names: "item_id"
+    feature_type: IdFeature
+    embedding_dim: 16
+    hash_bucket_size: 500000
+  }
+  features {
+    input_names: "age"
+    feature_type: RawFeature
+    boundaries: [18, 25, 35, 45, 55, 65]
+    embedding_dim: 8
+  }
+  features {
+    input_names: "category"
+    feature_type: IdFeature
+    embedding_dim: 8
+    hash_bucket_size: 1000
+  }
+  features {
+    input_names: "price"
+    feature_type: RawFeature
+    normalizer_name: "price_normalizer"
+  }
+}
+
+# ---------------------------------------------------------------
+# Model Configuration - DeepFM
+# ---------------------------------------------------------------
+model_config {
+  model_class: "DeepFM"
+  feature_groups {
+    group_name: "all"
+    feature_names: "user_id"
+    feature_names: "item_id"
+    feature_names: "age"
+    feature_names: "category"
+    feature_names: "price"
+    wide_deep: DEEP
+  }
+  deepfm {
+    wide_output_dim: 16
+    dnn {
+      hidden_units: [256, 128, 64]
+    }
+    final_dnn {
+      hidden_units: [64, 32]
+    }
+    l2_regularization: 1e-6
+  }
+  embedding_regularization: 1e-6
+}
+
+# ---------------------------------------------------------------
+# Training Configuration
+# ---------------------------------------------------------------
+train_config {
+  optimizer_config: {
+    adam_optimizer: {
+      learning_rate: {
+        exponential_decay_learning_rate {
+          initial_learning_rate: 0.001
+          decay_steps: 1000
+          decay_factor: 0.95
+          min_learning_rate: 0.00001
+        }
+      }
+    }
+    use_moving_average: false
+  }
+  num_steps: 10000
+  sync_replicas: false
+  save_checkpoints_steps: 1000
+  log_step_count_steps: 100
+}
+
+# ---------------------------------------------------------------
+# Evaluation Configuration
+# ---------------------------------------------------------------
+eval_config {
+  metrics_set {
+    auc {}
+  }
+}
+
+# ---------------------------------------------------------------
+# Export Configuration
+# ---------------------------------------------------------------
+export_config {
+  exporter_type: "best"
+  exports_to_keep: 3
+}
