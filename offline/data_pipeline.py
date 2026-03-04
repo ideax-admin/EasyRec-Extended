@@ -55,13 +55,12 @@ class DataPipeline:
             raw_data_path: Path to the input JSON-Lines file.
             output_path: Destination path for the output CSV file.
             pipeline_config_path: Optional override for the instance-level
-                pipeline config path.
+                pipeline config path.  Reserved for future schema-ordered
+                column output; currently unused.
 
         Returns:
             Dict with ``status``, ``rows_written``, and ``output_path``.
         """
-        config_path = pipeline_config_path or self.pipeline_config_path
-
         if not os.path.exists(raw_data_path):
             logger.error(f"Raw data file not found: {raw_data_path}")
             return {'status': 'failed', 'error': f"File not found: {raw_data_path}"}

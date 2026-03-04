@@ -11,7 +11,8 @@ class EmbeddingRecallEngine(BaseRecallEngine):
     """Recall engine that computes user embeddings via an EasyRec model.
 
     Uses :class:`easyrec_extended.adapters.model_inference.EasyRecModelInference`
-    to generate a user embedding vector, which can then be used for approximate
+    (or a :class:`easyrec_extended.model_manager.ModelManager`) to generate a
+    user embedding vector, which can then be used for approximate
     nearest-neighbour (ANN) retrieval against an item index.
 
     ANN retrieval (e.g. via Faiss or Milvus) is not yet wired in; the
@@ -20,20 +21,26 @@ class EmbeddingRecallEngine(BaseRecallEngine):
 
     Args:
         model_inference: An :class:`EasyRecModelInference` instance used to
-            compute embeddings.  When *None*, the engine returns an empty list.
+            compute embeddings.  When *None*, ``model_manager`` is used as a
+            fallback.
         feature_service: An optional :class:`FeatureService` used to fetch
             user features before calling the model.
+        model_manager: An optional :class:`ModelManager` used for inference
+            when ``model_inference`` is not provided.
     """
 
-    def __init__(self, model_inference=None, feature_service=None):
-        """Initialise the embedding recall engine.
+    def __init__(self, model_inference=None, feature_service=None, model_manager=None):
+        """Initialize the embedding recall engine.
 
         Args:
             model_inference: EasyRecModelInference instance (optional).
             feature_service: FeatureService instance (optional).
+            model_manager: ModelManager instance used when model_inference
+                is None (optional).
         """
         self._model_inference = model_inference
         self._feature_service = feature_service
+        self._model_manager = model_manager
 
     def get_user_embedding(self, user_id: str, user_features: Optional[dict] = None) -> Optional[list]:
         """Compute a user embedding using the configured model.
@@ -47,8 +54,18 @@ class EmbeddingRecallEngine(BaseRecallEngine):
             Embedding as a list of floats, or *None* if the model is not
             loaded or the call fails.
         """
-        if self._model_inference is None or not self._model_inference.is_loaded:
+        # Determine the active inference backend
+        inference = self._model_inference
+        if inference is None and self._model_manager is not None:
+            # Use model_manager.predict directly
+            if not self._model_manager.is_ready():
+                logger.warning("EmbeddingRecallEngine: model_manager not ready")
+                return None
+        elif inference is not None and not inference.is_loaded:
             logger.warning("EmbeddingRecallEngine: no model loaded, cannot compute embedding")
+            return None
+        elif inference is None:
+            logger.warning("EmbeddingRecallEngine: no model or model_manager provided")
             return None
 
         if user_features is None and self._feature_service is not None:
@@ -56,7 +73,11 @@ class EmbeddingRecallEngine(BaseRecallEngine):
 
         features = user_features or {}
         try:
-            result = self._model_inference.predict(features)
+            if self._model_inference is not None:
+                result = self._model_inference.predict(features)
+            else:
+                result = self._model_manager.predict(features)
+
             embedding = result.get('user_embedding') or result.get('output_0')
             if embedding is not None:
                 return embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding)

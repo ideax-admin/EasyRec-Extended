@@ -110,7 +110,7 @@ class RecommendationEngine:
             try:
                 from engine.recall.embedding_recall import EmbeddingRecallEngine
                 embedding_engine = EmbeddingRecallEngine(
-                    model_inference=None,  # model_manager used via predict
+                    model_manager=self.model_manager,
                     feature_service=self.feature_service,
                 )
                 recalled = embedding_engine.recall(request)
