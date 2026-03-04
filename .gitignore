@@ -51,3 +51,6 @@ logs/
 data/
 *.csv
 *.parquet
+
+# Local agent instructions
+AGENTS.md
