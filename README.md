@@ -11,12 +11,21 @@ EasyRec-Extended/
 │   │   ├── easyrec_adapter.py     # Wraps EasyRec train/export/eval APIs
 │   │   ├── model_inference.py     # TF SavedModel online inference
 │   │   └── config_bridge.py      # Protobuf → Python config bridge
+│   ├── ann/                       # ANN (Approximate Nearest Neighbour) index
+│   │   ├── base_index.py          # Abstract BaseANNIndex interface
+│   │   └── faiss_index.py         # Faiss-backed FaissANNIndex implementation
 │   ├── features/
 │   │   └── feature_service.py    # User/item feature retrieval
 │   └── model_manager.py          # Multi-version model management
 │
 ├── engine/                        # Recommendation pipeline
+│   ├── recall/
+│   │   ├── embedding_recall.py   # Embedding + ANN recall engine
+│   │   └── fallback_recall.py    # Synthetic fallback recall engine
 │   └── recommendation_engine.py  # 4-stage pipeline orchestrator
+│
+├── scripts/
+│   └── build_ann_index.py         # CLI: build a Faiss index from embeddings
 │
 ├── serving/                       # HTTP serving layer
 │   ├── api.py                     # Flask REST API routes
@@ -67,6 +76,8 @@ cd EasyRec-Extended
 pip install -r requirements.txt
 # optional: install EasyRec
 pip install git+https://github.com/alibaba/EasyRec.git
+# optional: install Faiss for ANN retrieval
+pip install "easyrec-extended[ann]"   # or: pip install faiss-cpu
 ```
 
 ### 2. Configure
@@ -96,7 +107,38 @@ trainer.train(model_dir='experiments/my_model')
 trainer.export_model(model_dir='experiments/my_model', export_dir='exports/v1')
 ```
 
-### 4. Run the Serving Service
+### 4. Build the ANN Index (optional)
+
+Export item embeddings from your trained model and build a Faiss index for
+fast approximate nearest-neighbour retrieval:
+
+```bash
+# From a numpy file (shape: n_items × embedding_dim)
+python scripts/build_ann_index.py \
+    --embedding_file exports/item_embeddings.npy \
+    --output_path data/item_index \
+    --dimension 64
+
+# From a CSV file (first column = item_id)
+python scripts/build_ann_index.py \
+    --embedding_file exports/item_embeddings.csv \
+    --output_path data/item_index \
+    --dimension 64 \
+    --index_type Flat
+```
+
+Load the index at serving time:
+
+```python
+from easyrec_extended.ann.faiss_index import FaissANNIndex
+from engine.recall.embedding_recall import EmbeddingRecallEngine
+
+ann_index = FaissANNIndex(dimension=64)
+engine = EmbeddingRecallEngine(model_manager=model_manager, ann_index=ann_index)
+engine.load_index('data/item_index')
+```
+
+### 5. Run the Serving Service
 
 ```bash
 python app.py
@@ -108,7 +150,7 @@ Or with Docker:
 docker-compose up -d
 ```
 
-### 5. Get Recommendations
+### 6. Get Recommendations
 
 ```bash
 # REST API
