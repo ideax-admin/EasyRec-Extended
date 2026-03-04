@@ -1,6 +1,44 @@
 version: '3.8'
+
 services:
-  app:
+  easyrec:
     build: .
+    container_name: easyrec-extended
     ports:
       - "5000:5000"
+    environment:
+      - ENV=production
+      - DB_HOST=postgres
+      - REDIS_HOST=redis
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - easyrec-network
+
+  postgres:
+    image: postgres:14
+    container_name: easyrec-postgres
+    environment:
+      POSTGRES_DB: easyrec_db
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - easyrec-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: easyrec-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - easyrec-network
+
+volumes:
+  postgres_data:
+
+networks:
+  easyrec-network:
+    driver: bridge

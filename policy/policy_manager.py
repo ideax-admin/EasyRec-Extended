@@ -1,40 +1,60 @@
-import logging
-from typing import Dict, List, Callable, Any
-from enum import Enum
-from core.models import PolicyConfig
-
-logger = logging.getLogger(__name__)
-
-class PolicyStage(Enum):
-    RECALL = 'recall'
-    FUSION = 'fusion'
-    RANKING = 'ranking'
-    BUSINESS_RULES = 'business_rules'
-
 class PolicyManager:
+    """Manages policies across the recommendation pipeline."""
+    
     def __init__(self):
-        self.policies: Dict[PolicyStage, List[PolicyConfig]] = {stage: [] for stage in PolicyStage}
-        self.policy_executors: Dict[str, Callable] = {}
-
-    def register_policy(self, policy: PolicyConfig) -> None:
-        stage = PolicyStage(policy.stage)
-        self.policies[stage].append(policy)
-        logger.info(f"Registered policy '{policy.name}'")
-
-    def register_executor(self, policy_name: str, executor: Callable) -> None:
-        self.policy_executors[policy_name] = executor
-
-    def execute_policies(self, stage: PolicyStage, context: Dict[str, Any]) -> Dict[str, Any]:
-        logger.debug(f'Executing policies at stage {stage.value}')
-        policies = sorted(self.policies[stage], key=lambda p: p.priority)
+        self.policies = {
+            'recall': [],
+            'fusion': [],
+            'ranking': [],
+            'business_rules': []
+        }
+        self.executors = {}
+    
+    def register_policy(self, stage, policy_config):
+        """Register a policy for a specific stage."""
+        if stage not in self.policies:
+            raise ValueError(f"Unknown stage: {stage}")
+        self.policies[stage].append(policy_config)
+    
+    def register_executor(self, policy_name, executor_func):
+        """Register executor function for a policy."""
+        self.executors[policy_name] = executor_func
+    
+    def execute_stage_policies(self, stage, context, data):
+        """Execute all policies for a given stage."""
+        if stage not in self.policies:
+            raise ValueError(f"Unknown stage: {stage}")
+        
+        policies = self.policies[stage]
+        policies.sort(key=lambda p: p.get('priority', 5))
+        
         for policy in policies:
-            if not policy.enabled or policy.name not in self.policy_executors:
+            if not policy.get('enabled', True):
                 continue
+            
+            policy_name = policy['name']
+            if policy_name not in self.executors:
+                continue
+            
             try:
-                executor = self.policy_executors[policy.name]
-                result = executor(context, policy.params)
-                context['policy_results'] = context.get('policy_results', {})
-                context['policy_results'][policy.name] = result
+                executor = self.executors[policy_name]
+                result = executor(context, data, policy.get('params', {}))
+                data = result if result is not None else data
             except Exception as e:
-                logger.error(f"Error executing policy '{policy.name}': {str(e)}")
-        return context
+                print(f"Error executing policy {policy_name}: {e}")
+        
+        return data
+    
+    def disable_policy(self, policy_name):
+        """Disable a policy."""
+        for stage_policies in self.policies.values():
+            for policy in stage_policies:
+                if policy.get('name') == policy_name:
+                    policy['enabled'] = False
+    
+    def enable_policy(self, policy_name):
+        """Enable a policy."""
+        for stage_policies in self.policies.values():
+            for policy in stage_policies:
+                if policy.get('name') == policy_name:
+                    policy['enabled'] = True
